@@ -266,15 +266,15 @@ Results are cached per-connection after the first call, so repeated introspectio
 Returns each function's name, parameter list, and source body. The body is the verbatim q source — useful for displaying what a function does without leaving Elixir, or for building lightweight documentation tooling around a KDB+ instance.
 
 ```elixir
-{:ok, fns} = ExeQute.functions(conn, ".dash")
+{:ok, fns} = ExeQute.functions(conn, ".util")
 #=> [
 #=>   %{
-#=>     "name"   => ".dash.getquotes",
+#=>     "name"   => ".util.getquotes",
 #=>     "params" => ["sym", "start", "end"],
 #=>     "body"   => "{[sym;start;end] select from quote where sym=sym, date within (start;end)}"
 #=>   },
 #=>   %{
-#=>     "name"   => ".dash.lasttrade",
+#=>     "name"   => ".util.lasttrade",
 #=>     "params" => ["sym"],
 #=>     "body"   => "{[sym] last select from trade where sym=sym}"
 #=>   }

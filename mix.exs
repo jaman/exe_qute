@@ -28,7 +28,7 @@ defmodule ExeQute.MixProject do
   defp package do
     [
       licenses: ["MIT"],
-      links: %{}
+      links: %{"GitHub" => "https://github.com/jaman/exe_qute"}
     ]
   end
 
