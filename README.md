@@ -258,7 +258,7 @@ Results are cached per-connection after the first call, so repeated introspectio
 
 ```elixir
 {:ok, ns} = ExeQute.namespaces(conn)
-#=> [".myns", ".feed", ".dash", ".q", ".Q", ".h"]
+#=> [".myns", ".feed", ".util", ".q", ".Q", ".h"]
 ```
 
 ### Functions
