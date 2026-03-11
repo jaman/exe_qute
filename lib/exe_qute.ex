@@ -336,7 +336,7 @@ defmodule ExeQute do
   ## Examples
 
       {:ok, namespaces} = ExeQute.namespaces(conn)
-      #=> {:ok, [".myns", ".feed", ".dash", ".q", ".Q", ".h"]}
+      #=> {:ok, [".myns", ".feed", "\.util", ".q", ".Q", ".h"]}
 
       {:ok, namespaces} = ExeQute.namespaces(:rdb)
 
@@ -371,20 +371,20 @@ defmodule ExeQute do
 
       {:ok, fns} = ExeQute.functions(conn)
 
-      {:ok, fns} = ExeQute.functions(conn, ".dash")
+      {:ok, fns} = ExeQute.functions(conn, "\.util")
       #=> {:ok, [
       #=>   %{
-      #=>     "name"   => ".dash.getquotes",
+      #=>     "name"   => "\.util.getquotes",
       #=>     "params" => ["sym", "start", "end"],
       #=>     "body"   => "{[sym;start;end] select from quote where sym=sym, date within (start;end)}"
       #=>   },
       #=>   %{
-      #=>     "name"   => ".dash.lasttrade",
+      #=>     "name"   => "\.util.lasttrade",
       #=>     "params" => ["sym"],
       #=>     "body"   => "{[sym] last select from trade where sym=sym}"
       #=>   },
       #=>   %{
-      #=>     "name"   => ".dash.init",
+      #=>     "name"   => "\.util.init",
       #=>     "params" => [],
       #=>     "body"   => "{[] ...}"
       #=>   }
@@ -392,8 +392,8 @@ defmodule ExeQute do
 
   Calling a discovered function with its parameter list:
 
-      {:ok, [fn_info | _]} = ExeQute.functions(conn, ".dash")
-      name   = fn_info["name"]    #=> ".dash.getquotes"
+      {:ok, [fn_info | _]} = ExeQute.functions(conn, "\.util")
+      name   = fn_info["name"]    #=> "\.util.getquotes"
       params = fn_info["params"]  #=> ["sym", "start", "end"]
 
       {:ok, result} = ExeQute.query(conn, name, ["EUR/USD", ~D[2024-01-01], ~D[2024-12-31]])
