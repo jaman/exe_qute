@@ -38,7 +38,7 @@ defmodule ExeQute.Protocol do
 
   @spec recv(:gen_tcp.socket(), non_neg_integer()) :: {:ok, binary()} | {:error, term()}
   def recv(socket, timeout) do
-    with {:ok, <<_endian::8, msg_type::8, compressed::8, _reserved::8, size::little-32>>} <-
+    with {:ok, <<_endian::8, _msg_type::8, compressed::8, _reserved::8, size::little-32>>} <-
            :gen_tcp.recv(socket, 8, timeout),
          {:ok, raw} <- :gen_tcp.recv(socket, size - 8, timeout) do
       payload = if compressed == 1, do: kdb_decompress(raw), else: raw

@@ -1,3 +1,4 @@
+if Code.ensure_loaded?(Kino.JS) do
 defmodule ExeQute.SubscribeCell do
   @moduledoc false
 
@@ -136,4 +137,5 @@ defmodule ExeQute.SubscribeCell do
     .secret-btn:hover { background: #e8e8e8; }
     """
   end
+end
 end

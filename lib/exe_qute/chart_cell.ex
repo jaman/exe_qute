@@ -1,3 +1,4 @@
+if Code.ensure_loaded?(Kino.JS) do
 defmodule ExeQute.ChartCell do
   @moduledoc false
 
@@ -335,4 +336,5 @@ defmodule ExeQute.ChartCell do
     }
     """
   end
+end
 end

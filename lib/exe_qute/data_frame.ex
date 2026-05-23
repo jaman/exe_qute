@@ -30,7 +30,7 @@ defmodule ExeQute.DataFrame do
         {col, Enum.map(normalized, &Map.fetch!(&1, col))}
       end)
 
-    Explorer.DataFrame.new(series_map)
+    apply(Explorer.DataFrame, :new, [series_map])
   rescue
     _ -> normalized
   end

@@ -1,3 +1,4 @@
+if Code.ensure_loaded?(Kino.JS) do
 defmodule ExeQute.ConnectionCell do
   @moduledoc false
 
@@ -143,4 +144,5 @@ defmodule ExeQute.ConnectionCell do
     .secret-btn:hover { background: #e8e8e8; }
     """
   end
+end
 end

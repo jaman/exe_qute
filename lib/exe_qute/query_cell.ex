@@ -1,3 +1,4 @@
+if Code.ensure_loaded?(Kino.JS) do
 defmodule ExeQute.QueryCell do
   @moduledoc false
 
@@ -292,4 +293,5 @@ defmodule ExeQute.QueryCell do
     .editor-col { flex: 1; display: flex; flex-direction: column; }
     """
   end
+end
 end

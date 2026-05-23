@@ -1,3 +1,4 @@
+if Code.ensure_loaded?(Kino.JS) do
 defmodule ExeQute.EChart do
   @moduledoc """
   Live [Apache ECharts](https://echarts.apache.org) widget for Livebook.
@@ -282,4 +283,5 @@ defmodule ExeQute.EChart do
     }
     """
   end
+end
 end

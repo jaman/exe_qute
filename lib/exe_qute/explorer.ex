@@ -1,3 +1,4 @@
+if Code.ensure_loaded?(Kino.JS) do
 defmodule ExeQute.Explorer do
   @moduledoc """
   Interactive KDB+ explorer widget for Livebook.
@@ -28,7 +29,6 @@ defmodule ExeQute.Explorer do
       ExeQute.Explorer.new(password: System.fetch_env!("LB_KDB_PASSWORD"))
   """
 
-  alias VegaLite, as: Vl
 
   @store :exe_qute_explorer_results
 
@@ -386,26 +386,33 @@ defmodule ExeQute.Explorer do
     x_col = time_col || hd(cols)
     y_col = List.first(numeric_cols)
 
-    if y_col == nil or x_col == y_col do
+    if y_col == nil or x_col == y_col or not Code.ensure_loaded?(VegaLite) do
       nil
     else
-      data = Enum.map(maps, fn row -> Map.new(row, fn {k, v} -> {k, vl_value(v)} end) end)
-      x_type = if time_col, do: :temporal, else: :ordinal
-
-      spec =
-        Vl.new(width: 700, height: 300, title: "#{y_col} over #{x_col}")
-        |> Vl.data_from_values(data)
-        |> Vl.mark(:line)
-        |> Vl.encode_field(:x, x_col, type: x_type)
-        |> Vl.encode_field(:y, y_col, type: :quantitative, aggregate: :mean)
-
-      if color_col do
-        Vl.encode_field(spec, :color, color_col, type: :nominal)
-      else
-        spec
-      end
+      build_vega_chart(maps, x_col, y_col, time_col, color_col)
     end
   end
+
+  defp build_vega_chart(maps, x_col, y_col, time_col, color_col) do
+    vl = VegaLite
+    data = Enum.map(maps, fn row -> Map.new(row, fn {k, v} -> {k, vl_value(v)} end) end)
+    x_type = if time_col, do: :temporal, else: :ordinal
+
+    spec =
+      apply(vl, :new, [[width: 700, height: 300, title: "#{y_col} over #{x_col}"]])
+      |> apply(vl, :data_from_values, [data])
+      |> apply(vl, :mark, [:line])
+      |> apply(vl, :encode_field, [:x, x_col, [type: x_type]])
+      |> apply(vl, :encode_field, [:y, y_col, [type: :quantitative, aggregate: :mean]])
+
+    if color_col do
+      apply(vl, :encode_field, [spec, :color, color_col, [type: :nominal]])
+    else
+      spec
+    end
+  end
+
+  defp apply(data, mod, func, args), do: apply(mod, func, [data | args])
 
   defp vl_value(%DateTime{} = v), do: DateTime.to_iso8601(v)
   defp vl_value(%Date{} = v), do: Date.to_iso8601(v)
@@ -417,4 +424,5 @@ defmodule ExeQute.Explorer do
 
   defp nilify(""), do: nil
   defp nilify(v), do: v
+end
 end
