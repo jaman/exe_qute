@@ -181,10 +181,18 @@ defmodule ExeQute do
 
   Pass the q expression as the first argument and connection options as the second.
   Opens a connection, runs the query, then closes it. Accepts the same options as
-  `connect/1`, plus `:table_format` (`:maps` or `:columnar`, default `:maps`).
+  `connect/1`, plus:
+
+    * `:table_format` — `:maps` (default) or `:columnar`.
+    * `:trap` — when `true`, wraps the query in a server-side error trap so q
+      errors come back as `{:error, message}` rather than as backtrace responses.
+      See `ExeQute.QError` for the kdb+ gateway shapes this handles and for
+      `QError.trap/1` / `QError.untrap/1` helpers usable on persistent
+      connections.
 
       {:ok, result} = ExeQute.query("select from trade", host: "kdb-host", port: 5010)
       {:ok, result} = ExeQute.query("select from trade", host: "kdb-host", port: 5010, table_format: :columnar)
+      {:error, "type"} = ExeQute.query("1+`a", host: "kdb-host", port: 5010, trap: true)
 
   ## Persistent connection
 
@@ -210,23 +218,32 @@ defmodule ExeQute do
   def query(conn, query) when (is_pid(conn) or is_atom(conn)) and is_binary(query) do
     safe_call(conn, fn -> Connection.query(conn, query) end)
     |> format_result(:maps)
-    |> maybe_q_error()
+    |> QError.from_response()
   end
 
   @spec query(String.t(), connect_opts()) :: {:ok, term()} | {:error, term()}
   def query(query, opts) when is_binary(query) and is_list(opts) do
-    {format, conn_opts} = Keyword.pop(opts, :table_format, :maps)
+    {format, opts} = Keyword.pop(opts, :table_format, :maps)
+    {trap?, conn_opts} = Keyword.pop(opts, :trap, false)
+    effective_query = if trap?, do: QError.trap(query), else: query
 
     try do
       with {:ok, conn} <- connect(conn_opts) do
-        result = safe_call(conn, fn -> Connection.query(conn, query) end)
+        result = safe_call(conn, fn -> Connection.query(conn, effective_query) end)
         safe_stop(conn)
-        result |> format_result(format) |> maybe_q_error()
+
+        result
+        |> format_result(format)
+        |> QError.from_response()
+        |> maybe_untrap(trap?)
       end
     catch
       :exit, reason -> {:error, reason}
     end
   end
+
+  defp maybe_untrap(result, true), do: QError.untrap(result)
+  defp maybe_untrap(result, false), do: result
 
   @spec query(pid() | atom(), String.t(), list()) :: {:ok, term()} | {:error, term()}
   def query(conn, func, args)
@@ -234,7 +251,7 @@ defmodule ExeQute do
     q = func <> "[" <> Enum.map_join(args, ";", &to_q_literal/1) <> "]"
     safe_call(conn, fn -> Connection.query(conn, q) end)
     |> format_result(:maps)
-    |> maybe_q_error()
+    |> QError.from_response()
   end
 
   @doc """
@@ -727,15 +744,6 @@ defmodule ExeQute do
           {:ok, term()} | {:error, term()}
   defp format_result({:ok, result}, :maps), do: {:ok, result |> to_maps() |> unwrap()}
   defp format_result(tagged, _format), do: tagged
-
-  defp maybe_q_error({:ok, raw}) when is_binary(raw) do
-    case QError.parse(raw) do
-      {:ok, qerror} -> {:error, qerror}
-      :error -> {:ok, raw}
-    end
-  end
-
-  defp maybe_q_error(other), do: other
 
   defp unwrap([single]) when is_list(single) or is_map(single), do: single
   defp unwrap(other), do: other

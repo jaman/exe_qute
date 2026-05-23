@@ -8,14 +8,19 @@ defmodule ExeQute.QError do
   return `{:error, %ExeQute.QError{}}` rather than wrapping the backtrace
   in an `:ok` tuple.
 
-  The struct keeps both the raw backtrace text and a list of parsed frames.
+  The struct keeps the raw backtrace text, a list of parsed frames, and —
+  if the server emits one — an `:message` containing the error text (e.g.
+  `"hop. OS reports: Connection refused"`). Stock kdb+ gateways that only
+  emit a backtrace leave `:message` as `nil`; gateways patched to include
+  the error inline as `** Backtrace: <error>\\n  [N] ...` populate it.
+
   `inspect/1` renders the raw backtrace with line breaks preserved (so it
   shows readably in IEx), and `to_string/1` returns the same text for use
   with `IO.puts/1`.
   """
 
   @enforce_keys [:raw, :frames]
-  defstruct [:raw, :frames]
+  defstruct [:raw, :frames, message: nil]
 
   @type frame :: %{
           level: non_neg_integer(),
@@ -25,7 +30,11 @@ defmodule ExeQute.QError do
           function: String.t() | nil
         }
 
-  @type t :: %__MODULE__{raw: String.t(), frames: [frame()]}
+  @type t :: %__MODULE__{
+          raw: String.t(),
+          frames: [frame()],
+          message: String.t() | nil
+        }
 
   @prefix "** Backtrace:"
 
@@ -47,17 +56,120 @@ defmodule ExeQute.QError do
       ...>   ExeQute.QError.parse("** Backtrace:  [0]  (.Q.trp)\\n")
   """
   @spec parse(String.t()) :: {:ok, t()} | :error
-  def parse(@prefix <> _ = raw) do
+  def parse(@prefix <> rest = raw) do
+    {message, body_lines} = split_message(rest)
+
     frames =
-      raw
-      |> String.split("\n")
+      body_lines
       |> collect_frames([], nil)
       |> Enum.reverse()
 
-    {:ok, %__MODULE__{raw: raw, frames: frames}}
+    {:ok, %__MODULE__{raw: raw, frames: frames, message: message}}
   end
 
   def parse(_), do: :error
+
+  @doc """
+  Converts a `Connection.query` response tuple, replacing any backtrace
+  string (whether returned via `:ok` or raised as an `:error`) with a
+  `{:error, %ExeQute.QError{}}` tuple.
+
+  Responses that don't carry a backtrace are passed through unchanged.
+
+  ## Examples
+
+      iex> ExeQute.QError.from_response({:ok, [1, 2, 3]})
+      {:ok, [1, 2, 3]}
+
+      iex> ExeQute.QError.from_response({:error, :timeout})
+      {:error, :timeout}
+
+      iex> {:error, %ExeQute.QError{}} =
+      ...>   ExeQute.QError.from_response({:error, "** Backtrace:  [0]  (.Q.trp)"})
+  """
+  @spec from_response({:ok, term()} | {:error, term()}) ::
+          {:ok, term()} | {:error, term()}
+  def from_response({status, raw}) when status in [:ok, :error] and is_binary(raw) do
+    case parse(raw) do
+      {:ok, qerror} -> {:error, qerror}
+      :error -> {status, raw}
+    end
+  end
+
+  def from_response(other), do: other
+
+  @trap_ok "exe_qute_trap_ok"
+  @trap_err "exe_qute_trap_err"
+
+  @doc """
+  Wraps a q query string in a server-side error trap.
+
+  Use together with `untrap/1` to capture kdb+ errors directly, even on
+  gateways that swallow them inside `.Q.trp`. The wrapper installs an
+  `@[...]` form that fires *inside* the gateway's handler, so the error
+  string reaches the client untouched.
+
+  ## Examples
+
+      query = ExeQute.QError.trap("select from trade")
+      {:ok, conn} = ExeQute.connect(host: "kdb", port: 5010)
+      ExeQute.query(conn, query) |> ExeQute.QError.untrap()
+      #=> {:ok, [...]}   on success
+      #=> {:error, "..."} on q-side error, with the original error string
+  """
+  @spec trap(String.t()) :: String.t()
+  def trap(query) when is_binary(query) do
+    ~s|@[{(`#{@trap_ok};value x)};"#{escape_q_string(query)}";{(`#{@trap_err};x)}]|
+  end
+
+  @doc """
+  Unwraps a response previously wrapped with `trap/1`.
+
+  Tagged-success responses become `{:ok, value}`; tagged-error responses
+  become `{:error, error_string}`. Anything else is passed through
+  unchanged, so `untrap/1` is safe to chain after `ExeQute.query/2` even
+  if the trap wrapping ended up bypassed (e.g. by an outer gateway).
+  """
+  @spec untrap({:ok, term()} | {:error, term()}) :: {:ok, term()} | {:error, term()}
+  def untrap({:ok, [@trap_ok, value]}), do: {:ok, value}
+  def untrap({:ok, [@trap_err, msg]}), do: {:error, msg}
+  def untrap(other), do: other
+
+  defp escape_q_string(str) do
+    str
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
+  end
+
+  defp split_message(rest) do
+    lines = String.split(rest, "\n")
+
+    case lines do
+      [first | tail] ->
+        case first_frame_in_line(first) do
+          :frame -> {nil, lines}
+          {:message, msg} -> {msg, tail}
+        end
+
+      [] ->
+        {nil, []}
+    end
+  end
+
+  defp first_frame_in_line(line) do
+    trimmed = String.trim_leading(line)
+
+    case Regex.run(~r/^\[\d+\]/, trimmed) do
+      nil ->
+        case String.trim(trimmed) do
+          "" -> :frame
+          msg -> {:message, msg}
+        end
+
+      _ ->
+        :frame
+    end
+  end
 
   defp collect_frames([], frames, nil), do: frames
   defp collect_frames([], frames, current), do: [finalize_frame(current) | frames]

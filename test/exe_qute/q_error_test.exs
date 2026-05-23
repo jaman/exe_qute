@@ -38,6 +38,19 @@ defmodule ExeQute.QErrorTest do
     end
   end
 
+  @sample_with_message ~S"""
+  ** Backtrace: hop. OS reports: Connection refused
+    [4]  h:hopen `:204.8.241.101:11202:rdb:pass; r:h"(value;`.support.status_state)"; hclose h; r
+           ^
+    [3]  /opt/xtp/q/common/initreg.q:162: .qapp.processMsg@:
+                  v:value x;
+                    ^
+    [1]  (.Q.trp)
+
+    [0]  /opt/xtp/q/common/initreg.q:41: .z.pg:{...}
+                                                ^
+  """
+
   describe "parse/1" do
     test "returns :error for non-backtrace input" do
       assert :error = QError.parse("nope")
@@ -45,9 +58,24 @@ defmodule ExeQute.QErrorTest do
     end
 
     test "parses every frame from the sample backtrace" do
-      assert {:ok, %QError{frames: frames, raw: raw}} = QError.parse(@sample)
+      assert {:ok, %QError{frames: frames, raw: raw, message: nil}} = QError.parse(@sample)
       assert raw == @sample
       assert Enum.map(frames, & &1.level) == [5, 4, 3, 2, 1, 0]
+    end
+
+    test "extracts inline error message when the gateway includes one" do
+      assert {:ok, %QError{message: msg, frames: frames}} =
+               QError.parse(@sample_with_message)
+
+      assert msg == "hop. OS reports: Connection refused"
+      assert Enum.map(frames, & &1.level) == [4, 3, 1, 0]
+
+      frame_4 = Enum.find(frames, &(&1.level == 4))
+      assert String.starts_with?(frame_4.code, "h:hopen")
+    end
+
+    test "leaves message nil when the first non-prefix content is a frame marker" do
+      assert {:ok, %QError{message: nil}} = QError.parse(@sample)
     end
 
     test "frame without file/function captures code only" do
@@ -102,6 +130,74 @@ defmodule ExeQute.QErrorTest do
     test "to_string/1 returns the raw backtrace" do
       {:ok, qerror} = QError.parse(@sample)
       assert to_string(qerror) == @sample
+    end
+  end
+
+  describe "from_response/1" do
+    test "converts {:ok, backtrace_string} to {:error, %QError{}}" do
+      assert {:error, %QError{}} = QError.from_response({:ok, @sample})
+    end
+
+    test "converts {:error, backtrace_string} to {:error, %QError{}}" do
+      assert {:error, %QError{}} = QError.from_response({:error, @sample})
+    end
+
+    test "extracts the inline message when present on a raised backtrace" do
+      assert {:error, %QError{message: "hop. OS reports: Connection refused"}} =
+               QError.from_response({:error, @sample_with_message})
+    end
+
+    test "passes through non-backtrace :ok results unchanged" do
+      assert {:ok, [1, 2, 3]} = QError.from_response({:ok, [1, 2, 3]})
+      assert {:ok, "regular string"} = QError.from_response({:ok, "regular string"})
+    end
+
+    test "passes through non-backtrace :error results unchanged" do
+      assert {:error, :timeout} = QError.from_response({:error, :timeout})
+      assert {:error, "type"} = QError.from_response({:error, "type"})
+      assert {:error, {:connection_error, _}} =
+               QError.from_response({:error, {:connection_error, :econnrefused}})
+    end
+
+    test "passes through unrecognised shapes unchanged" do
+      assert :ok = QError.from_response(:ok)
+      assert nil == QError.from_response(nil)
+    end
+  end
+
+  describe "trap/1" do
+    test "wraps a plain query in the @[...] trap form" do
+      assert QError.trap("select from trade") ==
+               ~s|@[{(`exe_qute_trap_ok;value x)};"select from trade";{(`exe_qute_trap_err;x)}]|
+    end
+
+    test "escapes embedded double quotes" do
+      wrapped = QError.trap(~s|h"value `.a"|)
+      assert wrapped ==
+               ~s|@[{(`exe_qute_trap_ok;value x)};"h\\"value `.a\\"";{(`exe_qute_trap_err;x)}]|
+    end
+
+    test "escapes embedded backslashes" do
+      wrapped = QError.trap(~S|a\b|)
+      assert wrapped ==
+               ~S|@[{(`exe_qute_trap_ok;value x)};"a\\b";{(`exe_qute_trap_err;x)}]|
+    end
+  end
+
+  describe "untrap/1" do
+    test "unwraps a tagged success" do
+      assert {:ok, [1, 2, 3]} = QError.untrap({:ok, ["exe_qute_trap_ok", [1, 2, 3]]})
+    end
+
+    test "unwraps a tagged error to {:error, message}" do
+      assert {:error, "hop. OS reports: Connection refused"} =
+               QError.untrap({:ok, ["exe_qute_trap_err", "hop. OS reports: Connection refused"]})
+    end
+
+    test "passes through results without a trap tag" do
+      assert {:ok, [1, 2, 3]} = QError.untrap({:ok, [1, 2, 3]})
+      assert {:ok, "plain"} = QError.untrap({:ok, "plain"})
+      assert {:error, :timeout} = QError.untrap({:error, :timeout})
     end
   end
 end
