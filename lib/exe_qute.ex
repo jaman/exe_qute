@@ -127,6 +127,7 @@ defmodule ExeQute do
 
   alias ExeQute.Connection
   alias ExeQute.Introspect
+  alias ExeQute.QError
   alias ExeQute.Subscriber
 
   @type connect_opts :: [
@@ -209,6 +210,7 @@ defmodule ExeQute do
   def query(conn, query) when (is_pid(conn) or is_atom(conn)) and is_binary(query) do
     safe_call(conn, fn -> Connection.query(conn, query) end)
     |> format_result(:maps)
+    |> maybe_q_error()
   end
 
   @spec query(String.t(), connect_opts()) :: {:ok, term()} | {:error, term()}
@@ -219,7 +221,7 @@ defmodule ExeQute do
       with {:ok, conn} <- connect(conn_opts) do
         result = safe_call(conn, fn -> Connection.query(conn, query) end)
         safe_stop(conn)
-        format_result(result, format)
+        result |> format_result(format) |> maybe_q_error()
       end
     catch
       :exit, reason -> {:error, reason}
@@ -232,6 +234,7 @@ defmodule ExeQute do
     q = func <> "[" <> Enum.map_join(args, ";", &to_q_literal/1) <> "]"
     safe_call(conn, fn -> Connection.query(conn, q) end)
     |> format_result(:maps)
+    |> maybe_q_error()
   end
 
   @doc """
@@ -302,19 +305,23 @@ defmodule ExeQute do
       ExeQute.display(result, "select from trade")
 
   """
-  @spec display(term(), String.t()) :: Kino.Layout.t()
+  @spec display(term(), String.t()) :: Kino.Layout.t() | {:error, :kino_not_available}
   def display(result, label \\ "") do
-    raw = Kino.Markdown.new("```elixir\n#{inspect(result, pretty: true, limit: 1000)}\n```")
+    if Code.ensure_loaded?(Kino.Markdown) do
+      raw = Kino.Markdown.new("```elixir\n#{inspect(result, pretty: true, limit: 1000)}\n```")
 
-    tabular? = is_list(result) and match?([%{} | _], result)
-    treelike? = tabular? or (is_list(result) and result != []) or (is_map(result) and not is_struct(result))
+      tabular? = is_list(result) and match?([%{} | _], result)
+      treelike? = tabular? or (is_list(result) and result != []) or (is_map(result) and not is_struct(result))
 
-    tabs =
-      []
-      |> prepend_if(treelike?, {"Tree", Kino.Tree.new(result)})
-      |> prepend_if(tabular?, {"Table", Kino.DataTable.new(result, name: label)})
+      tabs =
+        []
+        |> prepend_if(treelike?, {"Tree", Kino.Tree.new(result)})
+        |> prepend_if(tabular?, {"Table", Kino.DataTable.new(result, name: label)})
 
-    Kino.Layout.tabs(tabs ++ [{"Raw", raw}])
+      Kino.Layout.tabs(tabs ++ [{"Raw", raw}])
+    else
+      {:error, :kino_not_available}
+    end
   end
 
   defp prepend_if(list, true, item), do: [item | list]
@@ -720,6 +727,15 @@ defmodule ExeQute do
           {:ok, term()} | {:error, term()}
   defp format_result({:ok, result}, :maps), do: {:ok, result |> to_maps() |> unwrap()}
   defp format_result(tagged, _format), do: tagged
+
+  defp maybe_q_error({:ok, raw}) when is_binary(raw) do
+    case QError.parse(raw) do
+      {:ok, qerror} -> {:error, qerror}
+      :error -> {:ok, raw}
+    end
+  end
+
+  defp maybe_q_error(other), do: other
 
   defp unwrap([single]) when is_list(single) or is_map(single), do: single
   defp unwrap(other), do: other
